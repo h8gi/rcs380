@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	vid = 0x054c // SONY
-	pid = 0x06c1 // RC-S380/S
+	sonnyVendorID    = 0x054c // SONY
+	rcs380sProductID = 0x06c1 // RC-S380/S
+	rcs380pProductID = 0x06c3 // RC-S380/p
 )
 
 var insetRFMap = map[rune][]byte{
@@ -32,16 +33,26 @@ var requestMap = map[rune][]byte{
 }
 
 type Device struct {
-	dev *gousb.Device
-	in  *gousb.InEndpoint
-	out *gousb.OutEndpoint
+	Dev *gousb.Device
+	In  *gousb.InEndpoint
+	Out *gousb.OutEndpoint
+}
+
+func findDevice() (*gousb.Device, error) {
+	ctx := gousb.NewContext()
+	defer ctx.Close()
+	dev, err := ctx.OpenDeviceWithVIDPID(sonnyVendorID, rcs380sProductID)
+	if dev != nil {
+		return dev, err
+	}
+	return ctx.OpenDeviceWithVIDPID(sonnyVendorID, rcs380pProductID)
 }
 
 func NewDevice() (*Device, error) {
 	ctx := gousb.NewContext()
 	defer ctx.Close()
 
-	dev, err := ctx.OpenDeviceWithVIDPID(vid, pid)
+	dev, err := findDevice()
 	if err != nil {
 		return nil, err
 	}
@@ -68,14 +79,14 @@ func NewDevice() (*Device, error) {
 	}
 
 	return &Device{
-		dev: dev,
-		in:  inEnd,
-		out: outEnd,
+		Dev: dev,
+		In:  inEnd,
+		Out: outEnd,
 	}, nil
 }
 
 func (d *Device) Close() error {
-	return d.dev.Close()
+	return d.Dev.Close()
 }
 
 // ヘッダー + データ長さ + データ長さのチェックサム + データ + データのチェックサム + フッター
@@ -107,12 +118,13 @@ func (d *Device) Write(command []byte) error {
 	b.WriteByte(csum)
 	b.WriteByte(0x00)
 
-	if _, err := d.out.Write(b.Bytes()); err != nil {
+	if _, err := d.Out.Write(b.Bytes()); err != nil {
 		return err
 	}
 
 	// receive ack/nck
-	if _, err := d.Read(); err != nil {
+	_, err := d.Read()
+	if err != nil {
 		return err
 	}
 
@@ -120,13 +132,13 @@ func (d *Device) Write(command []byte) error {
 }
 
 func (d *Device) Read() ([]byte, error) {
-	buf := make([]byte, d.in.Desc.MaxPacketSize)
-	n, err := d.in.Read(buf)
+	buf := make([]byte, d.In.Desc.MaxPacketSize*4)
+	n, err := d.In.Read(buf)
 	return buf[:n], err
 }
 
 func (d *Device) PacketInit() error {
-	_, err := d.out.Write([]byte{0x00, 0x00, 0xff, 0x00, 0xff, 0x00})
+	_, err := d.Out.Write([]byte{0x00, 0x00, 0xff, 0x00, 0xff, 0x00})
 	return err
 }
 
